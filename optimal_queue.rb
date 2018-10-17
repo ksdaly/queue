@@ -3,6 +3,7 @@
 require 'simple_uuid'
 require 'json'
 require 'nsq'
+require 'nsq-cluster'
 require 'time'
 require 'pry'
 
@@ -31,6 +32,12 @@ class Video
     @@videos[id] = self
   end
 
+  def progress
+    {
+      count: get(:video_played)
+    }
+  end
+
   def increment(key, val)
     stats[key] += val.to_i
   end
@@ -40,34 +47,15 @@ class Video
   end
 end
 
-class Message < Struct.new(:video_id, :qty, :occurred_at)
+class Message < OpenStruct
   def to_json
     {
-      video_id: video_id,
-      qty: qty.to_i,
-      occurred_at: occurred_at.iso8601
+      'video_id': video_id,
+      'qty': qty.to_i,
+      'occurred_at': occurred_at.iso8601
     }.to_json
   end
 end
-
-videos = {}
-messages = []
-batch_messages = []
-time_range_end = Time.now.to_i
-time_range_start = time_range_end - 300
-
-100.times do |n|
-  Video.new.tap do |video|
-    video.save
-    plays = n < 20 ? 40 : 1240
-
-    plays.times do
-      messages << Message.new(video.id, 1, Time.at(rand(time_range_start...time_range_end)))
-    end
-  end
-end
-
-messages.shuffle!
 
 class Processor
   @@cache = Hash.new(0)
@@ -82,7 +70,7 @@ class Processor
     
     if count < 100
       count = video.increment(:video_played, message.qty)
-      puts "play count for #{ message.video_id }: #{ count }"
+      puts "#{ video.id }: #{ video.progress }"
     else
       @@cache[message.video_id] += message.qty
     end
@@ -92,37 +80,84 @@ class Processor
     copy = @@cache
     @@cache = Hash.new(0)
 
-    copy.to_a.each_slice(20) do |messages|
+    copy.to_a.each_slice(20) do |batch|
       counts = {}
-      messages.each do |message|
-        video = Video.find(message[0])
-        count = video.increment(:video_played, message[1])
-        counts[message[0]] = count
+      batch.each do |data|
+        message = Message.new(video_id: data[0], qty: data[1], occurred_at: Time.now)
+        video = Video.find(message.video_id)
+        count = video.increment(:video_played, message.qty)
+        counts[message.video_id] = video.progress
       end
       puts "play count for batch: #{ counts }"
     end
   end
 end
 
-# process = true
+messages = []
+time_range_end = Time.now.to_i
+time_range_start = time_range_end - 300
+
+100.times do |n|
+  Video.new.tap do |video|
+    video.save
+    plays = n < 20 ? 40 : 1240
+
+    plays.times do
+      messages << Message.new(video_id: video.id, qty: 1, occurred_at: Time.at(rand(time_range_start...time_range_end))).to_json
+    end
+  end
+end
+
+cluster = NsqCluster.new(nsqd_count: 10, nsqlookupd_count: 1)
+nsqd = cluster.nsqd.first
+nsqd.create(topic: 'video_played')
+nsqd.create(topic: 'video_played', channel: 'video')
+
+producer = Nsq::Producer.new(
+  topic: 'video_played'
+)
+
+consumer = Nsq::Consumer.new(
+  nsqlookupd: cluster.nsqlookupd.map { |nsqlookupd|
+    "#{nsqlookupd.host}:#{nsqlookupd.http_port}"
+  },
+  topic: 'video_played',
+  channel: 'video'
+)
+
+consumer2 = Nsq::Consumer.new(
+  nsqlookupd: cluster.nsqlookupd.map { |nsqlookupd|
+    "#{nsqlookupd.host}:#{nsqlookupd.http_port}"
+  },
+  topic: 'batch',
+  channel: 'video'
+)
+
+begin
+  messages.shuffle!
+
+  messages.each_slice(10_000) do |batch|
+    nsqd.mpub('video_played', *batch)
+  end  
+
+  while true
+    message = consumer.pop
+    Processor.process(Message.new(JSON.parse(message.body, symbolize_names: true)))
+    message.finish
+  end
+ensure
+  cluster.destroy
+  producer.terminate
+  consumer.terminate
+  consumer2.terminate
+end  
+
+
 # TIK = 60
-
-# while process
+# while
 #   start = Time.now
-
-#   # process batch messages
 #   Processor.batch_process
-
+#   break unless  messages.size > 0 || Processor.cache.size > 0
 #   sleep(start.to_i + TIK - Time.now.to_i)
 # end
 
-n = 0
-messages.each do |message|
-  Processor.process(message)
-  n += 1
-  Processor.batch_process if n % 10_000 == 0
-end
-
-Video.all.each do |id, video|
-  puts "total count: #{ video.get(:video_played) }"
-end
