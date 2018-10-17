@@ -67,7 +67,7 @@ class Processor
   def self.process(message)
     video = Video.find(message.video_id)
     count = video.get(:video_played)
-    
+
     if count < 100
       count = video.increment(:video_played, message.qty)
       puts "#{ video.id }: #{ video.progress }"
@@ -108,56 +108,58 @@ time_range_start = time_range_end - 300
   end
 end
 
-cluster = NsqCluster.new(nsqd_count: 10, nsqlookupd_count: 1)
+cluster = NsqCluster.new(nsqd_count: 2, nsqlookupd_count: 2, nsqd_options: { verbose: true }, nsqlookupd_options: { verbose: true})
 nsqd = cluster.nsqd.first
 nsqd.create(topic: 'video_played')
-nsqd.create(topic: 'video_played', channel: 'video')
+nsqd.create(topic: 'video_played', channel: 'default')
+
+sleep(5)
 
 producer = Nsq::Producer.new(
+  nsqlookupd: ['127.0.0.1:4361', '127.0.0.1:4363'],
   topic: 'video_played'
 )
 
 consumer = Nsq::Consumer.new(
-  nsqlookupd: cluster.nsqlookupd.map { |nsqlookupd|
-    "#{nsqlookupd.host}:#{nsqlookupd.http_port}"
-  },
+  nsqlookupd: ['127.0.0.1:4361', '127.0.0.1:4363'],
   topic: 'video_played',
-  channel: 'video'
+  channel: 'default'
 )
 
-consumer2 = Nsq::Consumer.new(
-  nsqlookupd: cluster.nsqlookupd.map { |nsqlookupd|
-    "#{nsqlookupd.host}:#{nsqlookupd.http_port}"
-  },
-  topic: 'batch',
-  channel: 'video'
-)
+sleep(5) #ensure connection
 
 begin
   messages.shuffle!
 
-  messages.each_slice(10_000) do |batch|
-    nsqd.mpub('video_played', *batch)
-  end  
-
-  while true
-    message = consumer.pop
-    Processor.process(Message.new(JSON.parse(message.body, symbolize_names: true)))
-    message.finish
+  producer_thread = Thread.new do
+     messages.each do |message|
+      producer.write_to_topic('video_played', message)
+    end
   end
+
+  message_thread = Thread.new do
+    loop do
+      message = consumer.pop
+      Processor.process(Message.new(JSON.parse(message.body, symbolize_names: true)))
+      message.finish
+    end
+  end
+
+  batch_message_thread = Thread.new do
+    tik = 60
+    loop do
+      start = Time.now
+      Processor.batch_process
+      sleep(start.to_i + tik - Time.now.to_i)
+    end
+  end
+
+  producer_thread.join
+  message_thread.join
+  batch_message_thread.join
+
 ensure
   cluster.destroy
   producer.terminate
   consumer.terminate
-  consumer2.terminate
-end  
-
-
-# TIK = 60
-# while
-#   start = Time.now
-#   Processor.batch_process
-#   break unless  messages.size > 0 || Processor.cache.size > 0
-#   sleep(start.to_i + TIK - Time.now.to_i)
-# end
-
+end
