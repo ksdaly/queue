@@ -14,11 +14,10 @@ begin
   cluster = Cluster.new
 
   puts 'starting producer'
-  producer = Producer.new(messages)
+  producer = Producer.new(messages).tap { |producer| producer.start }
 
   puts 'starting consumer'
-  consumer = Consumer.new
+  consumer = Consumer.new.tap { |consumer| consumer.start }
 rescue Exception
-  puts 'stopping'
-  cluster.destroy
+  cluster.destroy if defined?(cluster)
 end

@@ -10,7 +10,7 @@
 
 ## Stop processing queue
 ```
-cmd + c
+cntrl + c
 ```
 ## Post Mortem
 

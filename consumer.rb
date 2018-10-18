@@ -16,29 +16,27 @@ class Consumer
       channel: 'default'
     )
     sleep(3)
-    start
   end
 
   def start
-    batch_message_thread = get_batch_message_thread
-    message_thread = get_message_thread
-
-    batch_message_thread.join
-    message_thread.join
+    threads.each(&:join)
   rescue Exception
     stop
   end
 
   def stop
+    threads.each(&:kill)
     worker.terminate
+  end
+
+  def threads
+    @threads ||= [get_batch_message_thread, get_message_thread]
   end
 
   def get_message_thread
     Thread.new do
       loop do
-        message = worker.pop
-        processor.process(Message.new(JSON.parse(message.body, symbolize_names: true)))
-        message.finish
+        execute_message
       end
     end
   end
@@ -47,9 +45,20 @@ class Consumer
     Thread.new do
       loop do
         start = Time.now
-        processor.batch_process
+        execute_batch_message
         sleep(start.to_i + TIK - Time.now.to_i)
       end
     end
+  end
+
+  def execute_message
+    if message = worker.pop
+      processor.process(Message.new(JSON.parse(message.body, symbolize_names: true)))
+      message.finish
+    end
+  end
+
+  def execute_batch_message
+    processor.batch_process
   end
 end

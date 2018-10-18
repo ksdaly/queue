@@ -10,25 +10,32 @@ class Producer
       topic: 'videos'
     )
     sleep(3)
-    start
   end
 
   def start
-    message_thread = get_message_thread
-    message_thread.join
-  end
-
-  def stop
-    worker.terminate
+    threads.each(&:join)
   rescue Exception
     stop
   end
 
+  def stop
+    threads.each(&:kill)
+    worker.terminate
+  end
+
+  def threads
+    @threads ||= [get_message_thread]
+  end
+
   def get_message_thread
     Thread.new do
-      queue.each do |message|
-        worker.write_to_topic('videos', message)
-      end
+      execute_messages
+    end
+  end
+
+  def execute_messages
+    queue.each do |message|
+      worker.write_to_topic('videos', message)
     end
   end
 end
