@@ -16,7 +16,7 @@ Post Mortem
 
 What went well?
 
-The project overall went well. I spent about 30% of time planning and researching how queues are implemented in other projects. Netflix has a lot of very good information in their [tech blog](https://medium.com/netflix-techblog). I also found that game design has a lot overlap with event processing, notably, I found this [ebook](http://gameprogrammingpatterns.com/contents.html) helpful. It was also worthwile checking out tools that are design to do something similar, for example, [Apollo Client] (https://www.apollographql.com/docs/react/) batches queries in time increments. The most productive moment was to describe my ideas on the back of a magazine to my husband (who is not an engineer) during breakfast. After this initial stage the implementation was pretty straight forward.
+The project overall went well. I spent about 30% of time planning and researching how queues are implemented in other projects. Netflix has a lot of very good information in their [tech blog](https://medium.com/netflix-techblog). I also found that game design has a lot overlap with event processing, notably, I found this [ebook](http://gameprogrammingpatterns.com/contents.html) helpful. It was also worthwile checking out tools that are design to do something similar, for example, [Apollo Client](https://www.apollographql.com/docs/react/) batches queries in time increments. The most productive moment was to describe my ideas on the back of a magazine to my husband (who is not an engineer) during breakfast. After this initial stage the implementation was pretty straight forward.
 
 ![Alt text](./readme_img.jpg?raw=true "Whiteboarding")
 
